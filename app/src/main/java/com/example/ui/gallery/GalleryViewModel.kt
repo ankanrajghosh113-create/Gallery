@@ -15,6 +15,12 @@ import com.example.data.model.Album
 import com.example.data.model.MediaItem
 import com.example.data.repository.FavoritesRepository
 import com.example.data.repository.MediaStoreRepository
+import com.example.data.repository.SettingsRepository
+import com.example.data.repository.SortOrder
+import com.example.data.repository.TrashRepository
+import com.example.data.repository.TrashedMediaItem
+import com.example.data.repository.UserPreferences
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
@@ -26,14 +32,33 @@ enum class ViewMode {
     GRID_3, GRID_4, LIST
 }
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class GalleryViewModel(application: Application) : AndroidViewModel(application) {
 
+    private val db = GalleryDatabase.getDatabase(application)
     private val mediaRepo = MediaStoreRepository(application)
-    private val favDao = GalleryDatabase.getDatabase(application).favoriteDao()
+    private val favDao = db.favoriteDao()
     private val favRepo = FavoritesRepository(favDao)
+    private val trashDao = db.trashDao()
+    private val trashRepo = TrashRepository(trashDao)
+    private val settingsRepo = SettingsRepository(application)
+
+    val userPreferences: StateFlow<UserPreferences> = settingsRepo.userPreferencesFlow.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = UserPreferences()
+    )
 
     private val _rawMediaItems = MutableStateFlow<List<MediaItem>>(emptyList())
     val favoriteIds: StateFlow<List<Long>> = favRepo.favoriteIds.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = emptyList()
+    )
+
+    val trashedMedia: StateFlow<List<TrashedMediaItem>> = userPreferences.flatMapLatest { prefs ->
+        trashRepo.getTrashedItemsFlow(prefs.retentionDays)
+    }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000),
         initialValue = emptyList()
@@ -66,36 +91,70 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     private val _isLoading = MutableStateFlow(true)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
-    private val _extraFilters = combine(_dateRange, _activeAlbum) { date, album -> Pair(date, album) }
+    private data class SearchAndFilterOptions(
+        val query: String,
+        val filter: FilterType,
+        val dateRange: Pair<Long?, Long?>?,
+        val album: String?,
+        val prefs: UserPreferences
+    )
+
+    private val filterOptions: Flow<SearchAndFilterOptions> = combine(
+        _searchQuery,
+        _filterType,
+        _dateRange,
+        _activeAlbum,
+        userPreferences
+    ) { query, filter, date, album, prefs ->
+        SearchAndFilterOptions(query, filter, date, album, prefs)
+    }
+
+    // Active media items excluding items in trash
+    private val activeRawMedia: StateFlow<List<MediaItem>> = combine(
+        _rawMediaItems,
+        trashedMedia
+    ) { items, trashed ->
+        val trashedIds = trashed.map { it.mediaItem.id }.toSet()
+        items.filterNot { trashedIds.contains(it.id) }
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = emptyList()
+    )
 
     // Combined filtered media list
     val filteredMedia: StateFlow<List<MediaItem>> = combine(
-        _rawMediaItems,
+        activeRawMedia,
         favoriteIds,
-        _searchQuery,
-        _filterType,
-        _extraFilters
-    ) { items, favs, query, filter, extra ->
-        val date = extra.first
-        val album = extra.second
-        items.map { item ->
+        filterOptions
+    ) { items, favs, opts ->
+        val query = opts.query
+        val filter = opts.filter
+        val date = opts.dateRange
+        val album = opts.album
+        val prefs = opts.prefs
+
+        val list = items.map { item ->
             item.copy(isFavorite = favs.contains(item.id))
         }.filter { item ->
             // Album filter
             if (album != null && item.bucketName != album) return@filter false
 
+            val isScreenshot = item.bucketName.contains("screenshot", ignoreCase = true) || item.displayName.contains("screenshot", ignoreCase = true)
+            val isDoc = item.bucketName.contains("document", ignoreCase = true) || item.displayName.contains("doc", ignoreCase = true) || item.displayName.contains("pdf", ignoreCase = true) || item.displayName.contains("receipt", ignoreCase = true) || item.displayName.contains("scan", ignoreCase = true)
+
+            // Hide screenshots or documents if toggled off in settings (when viewing "ALL")
+            if (filter == FilterType.ALL) {
+                if (!prefs.showScreenshots && isScreenshot) return@filter false
+                if (!prefs.showDocuments && isDoc) return@filter false
+            }
+
             // Media Type / Smart filter
             when (filter) {
                 FilterType.PHOTOS_ONLY -> if (item.isVideo) return@filter false
                 FilterType.VIDEOS_ONLY -> if (!item.isVideo) return@filter false
-                FilterType.SCREENSHOTS -> {
-                    val isScreenshot = item.bucketName.contains("screenshot", ignoreCase = true) || item.displayName.contains("screenshot", ignoreCase = true)
-                    if (!isScreenshot) return@filter false
-                }
-                FilterType.DOCUMENTS -> {
-                    val isDoc = item.bucketName.contains("document", ignoreCase = true) || item.displayName.contains("doc", ignoreCase = true) || item.displayName.contains("pdf", ignoreCase = true) || item.displayName.contains("receipt", ignoreCase = true) || item.displayName.contains("scan", ignoreCase = true)
-                    if (!isDoc) return@filter false
-                }
+                FilterType.SCREENSHOTS -> if (!isScreenshot) return@filter false
+                FilterType.DOCUMENTS -> if (!isDoc) return@filter false
                 FilterType.ALL -> {}
             }
 
@@ -115,6 +174,12 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
 
             true
         }
+
+        if (prefs.sortOrder == SortOrder.OLDEST_FIRST) {
+            list.sortedBy { it.dateAdded }
+        } else {
+            list.sortedByDescending { it.dateAdded }
+        }
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000),
@@ -123,7 +188,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
 
     // Favorites only media list
     val favoriteMedia: StateFlow<List<MediaItem>> = combine(
-        _rawMediaItems,
+        activeRawMedia,
         favoriteIds
     ) { items, favs ->
         items.filter { favs.contains(it.id) }.map { it.copy(isFavorite = true) }
@@ -134,7 +199,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     )
 
     // Albums list
-    val albums: StateFlow<List<Album>> = _rawMediaItems.map { items ->
+    val albums: StateFlow<List<Album>> = activeRawMedia.map { items ->
         mediaRepo.buildAlbums(items)
     }.stateIn(
         scope = viewModelScope,
@@ -143,6 +208,16 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     )
 
     init {
+        viewModelScope.launch {
+            userPreferences.collect { prefs ->
+                trashRepo.purgeExpiredItems(prefs.retentionDays)
+                _viewMode.value = when (prefs.gridColumns) {
+                    4 -> ViewMode.GRID_4
+                    2 -> ViewMode.LIST
+                    else -> ViewMode.GRID_3
+                }
+            }
+        }
         loadMedia()
     }
 
@@ -172,6 +247,12 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
 
     fun setViewMode(mode: ViewMode) {
         _viewMode.value = mode
+        val cols = when (mode) {
+            ViewMode.GRID_3 -> 3
+            ViewMode.GRID_4 -> 4
+            ViewMode.LIST -> 2
+        }
+        viewModelScope.launch { settingsRepo.setGridColumns(cols) }
     }
 
     fun setActiveAlbum(albumName: String?) {
@@ -249,27 +330,40 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         val items = filteredMedia.value.filter { selectedIds.contains(it.id) }
         if (items.isEmpty()) return
 
-        deleteItems(context, items, onPendingIntentSender)
+        moveToTrash(context, items)
         clearSelection()
     }
 
     fun deleteSingleItem(context: Context, item: MediaItem, onPendingIntentSender: ((IntentSender) -> Unit)? = null) {
-        deleteItems(context, listOf(item), onPendingIntentSender)
+        moveToTrash(context, listOf(item))
     }
 
-    private fun deleteItems(context: Context, items: List<MediaItem>, onPendingIntentSender: ((IntentSender) -> Unit)? = null) {
-        val uris = items.map { it.uri }
-        val ids = items.map { it.id }
+    private fun moveToTrash(context: Context, items: List<MediaItem>) {
+        viewModelScope.launch {
+            trashRepo.moveToTrash(items)
+            Toast.makeText(context, "Moved ${items.size} item(s) to Recycle Bin", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun restoreFromTrash(context: Context, item: MediaItem) {
+        viewModelScope.launch {
+            trashRepo.restoreItem(item.id)
+            Toast.makeText(context, "Restored '${item.displayName}' to gallery", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun deleteForeverFromTrash(context: Context, item: MediaItem, onPendingIntentSender: ((IntentSender) -> Unit)? = null) {
+        val uris = listOf(item.uri)
+        val ids = listOf(item.id)
 
         viewModelScope.launch {
+            trashRepo.deletePermanently(item.id)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 try {
                     val pendingIntent = MediaStore.createDeleteRequest(context.contentResolver, uris)
                     onPendingIntentSender?.invoke(pendingIntent.intentSender)
                 } catch (e: Exception) {
                     e.printStackTrace()
-                    // Fallback local remove for sample media
-                    removeItemsLocally(ids)
                 }
             } else {
                 try {
@@ -277,8 +371,21 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 } catch (e: Exception) {
                     e.printStackTrace()
                 }
-                removeItemsLocally(ids)
             }
+            removeItemsLocally(ids)
+            Toast.makeText(context, "Permanently deleted", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun emptyRecycleBin(context: Context) {
+        val currentTrashed = trashedMedia.value.map { it.mediaItem }
+        if (currentTrashed.isEmpty()) return
+
+        val ids = currentTrashed.map { it.id }
+        viewModelScope.launch {
+            trashRepo.emptyTrash()
+            removeItemsLocally(ids)
+            Toast.makeText(context, "Recycle Bin emptied", Toast.LENGTH_SHORT).show()
         }
     }
 

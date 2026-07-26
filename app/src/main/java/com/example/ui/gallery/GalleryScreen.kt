@@ -1,5 +1,6 @@
 package com.example.ui.gallery
 
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -9,6 +10,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Photo
@@ -31,11 +33,16 @@ import com.example.ui.components.FilterDialog
 import com.example.ui.components.GallerySearchBar
 import com.example.ui.components.MediaGrid
 import com.example.ui.components.PermissionBanner
+import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.compose.material.icons.outlined.Settings
 import com.example.ui.favorites.FavoritesScreen
+import com.example.ui.settings.SettingsScreen
+import com.example.ui.settings.SettingsViewModel
+import com.example.ui.trash.TrashScreen
 import com.example.ui.viewer.PhotoViewerScreen
 
 enum class GalleryTab {
-    PHOTOS, ALBUMS, FAVORITES
+    PHOTOS, ALBUMS, FAVORITES, TRASH, SETTINGS
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -49,6 +56,7 @@ fun GalleryScreen(
     val mediaList by viewModel.filteredMedia.collectAsStateWithLifecycle()
     val favoriteList by viewModel.favoriteMedia.collectAsStateWithLifecycle()
     val albumsList by viewModel.albums.collectAsStateWithLifecycle()
+    val trashedList by viewModel.trashedMedia.collectAsStateWithLifecycle()
     val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
     val filterType by viewModel.filterType.collectAsStateWithLifecycle()
     val dateRange by viewModel.dateRange.collectAsStateWithLifecycle()
@@ -56,10 +64,57 @@ fun GalleryScreen(
     val activeAlbum by viewModel.activeAlbum.collectAsStateWithLifecycle()
     val selectedIds by viewModel.selectedMediaIds.collectAsStateWithLifecycle()
     val isMultiSelectMode by viewModel.isMultiSelectMode.collectAsStateWithLifecycle()
+    val userPrefs by viewModel.userPreferences.collectAsStateWithLifecycle()
+
+    val settingsViewModel: SettingsViewModel = viewModel()
 
     var selectedTab by remember { mutableStateOf(GalleryTab.PHOTOS) }
+    var previousTab by remember { mutableStateOf<GalleryTab?>(null) }
     var viewerStartIndex by remember { mutableStateOf<Int?>(null) }
     var showFilterDialog by remember { mutableStateOf(false) }
+    var showConfirmDeleteDialog by remember { mutableStateOf(false) }
+
+    val isRootState = selectedTab == GalleryTab.PHOTOS &&
+            activeAlbum == null &&
+            searchQuery.isEmpty() &&
+            filterType == FilterType.ALL &&
+            dateRange == null &&
+            !isMultiSelectMode &&
+            viewerStartIndex == null &&
+            !showFilterDialog &&
+            !showConfirmDeleteDialog
+
+    BackHandler(enabled = !isRootState) {
+        when {
+            showConfirmDeleteDialog -> {
+                showConfirmDeleteDialog = false
+            }
+            showFilterDialog -> {
+                showFilterDialog = false
+            }
+            viewerStartIndex != null -> {
+                viewerStartIndex = null
+            }
+            isMultiSelectMode -> {
+                viewModel.clearSelection()
+            }
+            activeAlbum != null -> {
+                viewModel.setActiveAlbum(null)
+                if (previousTab != null) {
+                    selectedTab = previousTab!!
+                    previousTab = null
+                }
+            }
+            searchQuery.isNotEmpty() || filterType != FilterType.ALL || dateRange != null -> {
+                viewModel.setSearchQuery("")
+                viewModel.setFilterType(FilterType.ALL)
+                viewModel.setDateRange(null, null)
+            }
+            selectedTab != GalleryTab.PHOTOS -> {
+                selectedTab = GalleryTab.PHOTOS
+            }
+        }
+    }
 
     var isSearchBarVisible by remember { mutableStateOf(true) }
     val nestedScrollConnection = remember {
@@ -114,10 +169,14 @@ fun GalleryScreen(
                         onShareSelected = { viewModel.shareSelected(context) },
                         onFavoriteSelected = { viewModel.favoriteSelected() },
                         onDeleteSelected = {
-                            viewModel.deleteSelectedItems(context) { intentSender ->
-                                deleteLauncher.launch(
-                                    IntentSenderRequest.Builder(intentSender).build()
-                                )
+                            if (userPrefs.confirmBeforeDelete) {
+                                showConfirmDeleteDialog = true
+                            } else {
+                                viewModel.deleteSelectedItems(context) { intentSender ->
+                                    deleteLauncher.launch(
+                                        IntentSenderRequest.Builder(intentSender).build()
+                                    )
+                                }
                             }
                         }
                     )
@@ -136,7 +195,11 @@ fun GalleryScreen(
                                 viewMode = viewMode,
                                 onViewModeChange = { viewModel.setViewMode(it) },
                                 hasDateFilter = dateRange != null,
-                                onOpenFilterDialog = { showFilterDialog = true }
+                                onOpenFilterDialog = { showFilterDialog = true },
+                                onOpenSettings = {
+                                    selectedTab = GalleryTab.SETTINGS
+                                    viewModel.clearSelection()
+                                }
                             )
 
                             // Active Album filter / Navigation Back banner
@@ -247,6 +310,36 @@ fun GalleryScreen(
                     },
                     label = { Text("Favorites") }
                 )
+
+                NavigationBarItem(
+                    selected = selectedTab == GalleryTab.TRASH,
+                    onClick = {
+                        selectedTab = GalleryTab.TRASH
+                        viewModel.clearSelection()
+                    },
+                    icon = {
+                        Icon(
+                            imageVector = if (selectedTab == GalleryTab.TRASH) Icons.Filled.Delete else Icons.Outlined.Delete,
+                            contentDescription = "Recycle Bin"
+                        )
+                    },
+                    label = { Text("Bin") }
+                )
+
+                NavigationBarItem(
+                    selected = selectedTab == GalleryTab.SETTINGS,
+                    onClick = {
+                        selectedTab = GalleryTab.SETTINGS
+                        viewModel.clearSelection()
+                    },
+                    icon = {
+                        Icon(
+                            imageVector = if (selectedTab == GalleryTab.SETTINGS) Icons.Filled.Settings else Icons.Outlined.Settings,
+                            contentDescription = "Settings"
+                        )
+                    },
+                    label = { Text("Settings") }
+                )
             }
         },
         modifier = modifier.nestedScroll(nestedScrollConnection)
@@ -290,6 +383,7 @@ fun GalleryScreen(
                             AlbumsScreen(
                                 albums = albumsList,
                                 onAlbumClick = { album ->
+                                    previousTab = GalleryTab.ALBUMS
                                     viewModel.setActiveAlbum(album.name)
                                     selectedTab = GalleryTab.PHOTOS
                                 }
@@ -314,6 +408,27 @@ fun GalleryScreen(
                                 onFavoriteToggle = { viewModel.toggleFavorite(it) }
                             )
                         }
+                        GalleryTab.TRASH -> {
+                            TrashScreen(
+                                trashedItems = trashedList,
+                                onRestore = { item -> viewModel.restoreFromTrash(context, item) },
+                                onDeleteForever = { item -> viewModel.deleteForeverFromTrash(context, item) },
+                                onEmptyTrash = { viewModel.emptyRecycleBin(context) }
+                            )
+                        }
+                        GalleryTab.SETTINGS -> {
+                            SettingsScreen(
+                                userPreferences = userPrefs,
+                                onGridColumnsChanged = { settingsViewModel.setGridColumns(it) },
+                                onRetentionDaysChanged = { settingsViewModel.setRetentionDays(it) },
+                                onSortOrderChanged = { settingsViewModel.setSortOrder(it) },
+                                onShowScreenshotsChanged = { settingsViewModel.setShowScreenshots(it) },
+                                onShowDocumentsChanged = { settingsViewModel.setShowDocuments(it) },
+                                onThemeModeChanged = { settingsViewModel.setThemeMode(it) },
+                                onConfirmBeforeDeleteChanged = { settingsViewModel.setConfirmBeforeDelete(it) },
+                                onClearCache = { onCleared -> settingsViewModel.clearThumbnailCache(context, onCleared) }
+                            )
+                        }
                     }
                 }
             }
@@ -324,6 +439,34 @@ fun GalleryScreen(
                 currentDateRange = dateRange,
                 onApplyDateRange = { from, to -> viewModel.setDateRange(from, to) },
                 onDismiss = { showFilterDialog = false }
+            )
+        }
+
+        if (showConfirmDeleteDialog) {
+            AlertDialog(
+                onDismissRequest = { showConfirmDeleteDialog = false },
+                title = { Text("Move to Recycle Bin?") },
+                text = { Text("Selected ${selectedIds.size} item(s) will be moved to Recycle Bin.") },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            showConfirmDeleteDialog = false
+                            viewModel.deleteSelectedItems(context) { intentSender ->
+                                deleteLauncher.launch(
+                                    IntentSenderRequest.Builder(intentSender).build()
+                                )
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                    ) {
+                        Text("Move to Bin")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showConfirmDeleteDialog = false }) {
+                        Text("Cancel")
+                    }
+                }
             )
         }
     }

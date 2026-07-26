@@ -88,38 +88,19 @@ fun MediaGrid(
                         DateHeader(title = dateHeader, count = itemList.size)
                     }
 
-                    if (itemList.size == 1) {
-                        val item = itemList.first()
-                        item(
-                            span = { GridItemSpan(columns) },
-                            key = item.id
-                        ) {
-                            val index = items.indexOf(item)
-                            MediaListItem(
-                                item = item,
-                                isSelected = selectedIds.contains(item.id),
-                                isMultiSelectMode = isMultiSelectMode,
-                                onClick = { onItemClick(item, index) },
-                                onLongClick = { onItemLongClick(item) },
-                                onFavoriteToggle = { onFavoriteToggle(item) },
-                                aspectRatio = 2.2f
-                            )
-                        }
-                    } else {
-                        items(
-                            items = itemList,
-                            key = { it.id }
-                        ) { item ->
-                            val index = items.indexOf(item)
-                            MediaListItem(
-                                item = item,
-                                isSelected = selectedIds.contains(item.id),
-                                isMultiSelectMode = isMultiSelectMode,
-                                onClick = { onItemClick(item, index) },
-                                onLongClick = { onItemLongClick(item) },
-                                onFavoriteToggle = { onFavoriteToggle(item) }
-                            )
-                        }
+                    items(
+                        items = itemList,
+                        key = { it.id }
+                    ) { item ->
+                        val index = items.indexOf(item)
+                        MediaListItem(
+                            item = item,
+                            isSelected = selectedIds.contains(item.id),
+                            isMultiSelectMode = isMultiSelectMode,
+                            onClick = { onItemClick(item, index) },
+                            onLongClick = { onItemLongClick(item) },
+                            onFavoriteToggle = { onFavoriteToggle(item) }
+                        )
                     }
                 }
             }

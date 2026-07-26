@@ -37,6 +37,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import androidx.activity.compose.BackHandler
 import com.example.data.model.MediaItem
 import java.text.SimpleDateFormat
 import java.util.*
@@ -63,6 +64,14 @@ fun PhotoViewerScreen(
 
     var showControls by remember { mutableStateOf(true) }
     var showInfoSheet by remember { mutableStateOf(false) }
+
+    BackHandler {
+        if (showInfoSheet) {
+            showInfoSheet = false
+        } else {
+            onBack()
+        }
+    }
 
     val currentItem = items.getOrNull(pagerState.currentPage) ?: items[0]
 

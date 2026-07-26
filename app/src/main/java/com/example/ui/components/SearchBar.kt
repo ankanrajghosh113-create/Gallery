@@ -22,6 +22,8 @@ import androidx.compose.ui.unit.sp
 import com.example.ui.gallery.FilterType
 import com.example.ui.gallery.ViewMode
 
+import androidx.compose.material.icons.filled.Settings
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GallerySearchBar(
@@ -33,6 +35,7 @@ fun GallerySearchBar(
     onViewModeChange: (ViewMode) -> Unit,
     hasDateFilter: Boolean,
     onOpenFilterDialog: () -> Unit,
+    onOpenSettings: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     Surface(
@@ -179,6 +182,20 @@ fun GallerySearchBar(
                             tint = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.size(20.dp)
                         )
+                    }
+
+                    if (onOpenSettings != null) {
+                        IconButton(
+                            onClick = onOpenSettings,
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Settings,
+                                contentDescription = "Settings",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
                     }
                 }
             }
