@@ -43,11 +43,13 @@ fun MediaListItem(
     onClick: () -> Unit,
     onLongClick: () -> Unit,
     onFavoriteToggle: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    aspectRatio: Float = 1f
 ) {
     Box(
         modifier = modifier
-            .aspectRatio(1f)
+            .fillMaxWidth()
+            .aspectRatio(aspectRatio)
             .clip(RoundedCornerShape(8.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant)
             .combinedClickable(
@@ -107,20 +109,22 @@ fun MediaListItem(
             }
         }
 
-        // Favorite Indicator Button
-        IconButton(
-            onClick = onFavoriteToggle,
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(2.dp)
-                .size(32.dp)
-        ) {
-            Icon(
-                imageVector = if (item.isFavorite) Icons.Default.Favorite else Icons.Outlined.FavoriteBorder,
-                contentDescription = "Favorite",
-                tint = if (item.isFavorite) Color(0xFFEF4444) else Color.White.copy(alpha = 0.8f),
-                modifier = Modifier.size(18.dp)
-            )
+        // Favorite Indicator Button (shown if favorited or in select mode)
+        if (item.isFavorite || isMultiSelectMode) {
+            IconButton(
+                onClick = onFavoriteToggle,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(2.dp)
+                    .size(32.dp)
+            ) {
+                Icon(
+                    imageVector = if (item.isFavorite) Icons.Default.Favorite else Icons.Outlined.FavoriteBorder,
+                    contentDescription = "Favorite",
+                    tint = if (item.isFavorite) Color(0xFFEF4444) else Color.White.copy(alpha = 0.8f),
+                    modifier = Modifier.size(18.dp)
+                )
+            }
         }
 
         // Selection Overlay / Checkbox

@@ -16,7 +16,11 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -56,6 +60,20 @@ fun GalleryScreen(
     var selectedTab by remember { mutableStateOf(GalleryTab.PHOTOS) }
     var viewerStartIndex by remember { mutableStateOf<Int?>(null) }
     var showFilterDialog by remember { mutableStateOf(false) }
+
+    var isSearchBarVisible by remember { mutableStateOf(true) }
+    val nestedScrollConnection = remember {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (available.y < -12f) {
+                    isSearchBarVisible = false
+                } else if (available.y > 12f) {
+                    isSearchBarVisible = true
+                }
+                return Offset.Zero
+            }
+        }
+    }
 
     // Intent launcher for System Delete confirmation dialog (Android 11+)
     val deleteLauncher = rememberLauncherForActivityResult(
@@ -104,40 +122,75 @@ fun GalleryScreen(
                         }
                     )
                 } else {
-                    GallerySearchBar(
-                        query = searchQuery,
-                        onQueryChange = { viewModel.setSearchQuery(it) },
-                        filterType = filterType,
-                        onFilterTypeChange = { viewModel.setFilterType(it) },
-                        viewMode = viewMode,
-                        onViewModeChange = { viewModel.setViewMode(it) },
-                        hasDateFilter = dateRange != null,
-                        onOpenFilterDialog = { showFilterDialog = true }
-                    )
+                    AnimatedVisibility(
+                        visible = isSearchBarVisible,
+                        enter = expandVertically() + fadeIn(),
+                        exit = shrinkVertically() + fadeOut()
+                    ) {
+                        Column {
+                            GallerySearchBar(
+                                query = searchQuery,
+                                onQueryChange = { viewModel.setSearchQuery(it) },
+                                filterType = filterType,
+                                onFilterTypeChange = { viewModel.setFilterType(it) },
+                                viewMode = viewMode,
+                                onViewModeChange = { viewModel.setViewMode(it) },
+                                hasDateFilter = dateRange != null,
+                                onOpenFilterDialog = { showFilterDialog = true }
+                            )
 
-                    // Active Album filter banner
-                    if (activeAlbum != null) {
-                        Surface(
-                            color = MaterialTheme.colorScheme.secondaryContainer,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 2.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .padding(horizontal = 12.dp, vertical = 6.dp)
-                                    .fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = "Filtered by Album: $activeAlbum",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSecondaryContainer
-                                )
-                                TextButton(onClick = { viewModel.setActiveAlbum(null) }) {
-                                    Text("Show All")
+                            // Active Album filter / Navigation Back banner
+                            if (activeAlbum != null || selectedTab != GalleryTab.PHOTOS) {
+                                Surface(
+                                    color = MaterialTheme.colorScheme.secondaryContainer,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .padding(horizontal = 12.dp, vertical = 6.dp)
+                                            .fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            IconButton(
+                                                onClick = {
+                                                    selectedTab = GalleryTab.PHOTOS
+                                                    viewModel.setActiveAlbum(null)
+                                                },
+                                                modifier = Modifier.size(32.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.ArrowBack,
+                                                    contentDescription = "Back to All Photos",
+                                                    tint = MaterialTheme.colorScheme.onSecondaryContainer
+                                                )
+                                            }
+                                            Text(
+                                                text = when {
+                                                    activeAlbum != null -> "Album: $activeAlbum"
+                                                    selectedTab == GalleryTab.ALBUMS -> "All Albums"
+                                                    selectedTab == GalleryTab.FAVORITES -> "Favorites"
+                                                    else -> "All Photos"
+                                                },
+                                                style = MaterialTheme.typography.titleSmall,
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                                            )
+                                        }
+                                        TextButton(
+                                            onClick = {
+                                                selectedTab = GalleryTab.PHOTOS
+                                                viewModel.setActiveAlbum(null)
+                                                viewModel.setFilterType(FilterType.ALL)
+                                            }
+                                        ) {
+                                            Text("Back to All Photos")
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -153,6 +206,7 @@ fun GalleryScreen(
                     selected = selectedTab == GalleryTab.PHOTOS,
                     onClick = {
                         selectedTab = GalleryTab.PHOTOS
+                        viewModel.setActiveAlbum(null)
                         viewModel.clearSelection()
                     },
                     icon = {
@@ -195,7 +249,7 @@ fun GalleryScreen(
                 )
             }
         },
-        modifier = modifier
+        modifier = modifier.nestedScroll(nestedScrollConnection)
     ) { innerPadding ->
         Box(
             modifier = Modifier

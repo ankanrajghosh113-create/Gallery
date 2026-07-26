@@ -19,7 +19,7 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
 enum class FilterType {
-    ALL, PHOTOS_ONLY, VIDEOS_ONLY
+    ALL, PHOTOS_ONLY, VIDEOS_ONLY, SCREENSHOTS, DOCUMENTS
 }
 
 enum class ViewMode {
@@ -84,10 +84,18 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
             // Album filter
             if (album != null && item.bucketName != album) return@filter false
 
-            // Media Type filter
+            // Media Type / Smart filter
             when (filter) {
                 FilterType.PHOTOS_ONLY -> if (item.isVideo) return@filter false
                 FilterType.VIDEOS_ONLY -> if (!item.isVideo) return@filter false
+                FilterType.SCREENSHOTS -> {
+                    val isScreenshot = item.bucketName.contains("screenshot", ignoreCase = true) || item.displayName.contains("screenshot", ignoreCase = true)
+                    if (!isScreenshot) return@filter false
+                }
+                FilterType.DOCUMENTS -> {
+                    val isDoc = item.bucketName.contains("document", ignoreCase = true) || item.displayName.contains("doc", ignoreCase = true) || item.displayName.contains("pdf", ignoreCase = true) || item.displayName.contains("receipt", ignoreCase = true) || item.displayName.contains("scan", ignoreCase = true)
+                    if (!isDoc) return@filter false
+                }
                 FilterType.ALL -> {}
             }
 

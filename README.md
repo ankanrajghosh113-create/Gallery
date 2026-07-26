@@ -1,1 +1,0 @@
-Android Gallery App is a native gallery application for Android that lets users browse, organize, and manage the photos and videos on their device. Built with Kotlin and Jetpack Compose (with an optional classic Views/RecyclerView implementation), it uses the MediaStore API for scoped-storage-compliant media access, MVVM architecture, and Coroutine
