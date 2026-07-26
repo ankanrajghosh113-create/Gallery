@@ -16,4 +16,6 @@
 local.properties
 .env
 debug.keystore
-.aistudio
+# AI Studio config
+.aistudio/
+assets/.aistudio/
