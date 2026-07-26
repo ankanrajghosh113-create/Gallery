@@ -1,0 +1,6 @@
+{
+  "name": "Gallery",
+  "description": "A feature-rich Android Gallery app with MediaStore integration, album grouping, full-screen viewer with pinch-to-zoom, search and date filtering, multi-select, share, delete, and favorites persistence.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
